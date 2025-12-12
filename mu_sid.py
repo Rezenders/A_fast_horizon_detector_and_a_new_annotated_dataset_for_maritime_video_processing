@@ -11,14 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 from FastHorizonAlg import FastHorizon
+
+from utils import read_mu_sid_groundtruth
 
 
 def main():
     fast_horizon_algorithm = FastHorizon()
     fast_horizon_algorithm.process_image_dataset(
-        '/datasets/mus_sid/MU-SID/MU-SID/')
+        '/datasets/mus_sid/MU-SID/MU-SID/',
+        dataset_name='MU-SID',
+        ground_truth_func=read_mu_sid_groundtruth,
+        gt_file_path='/datasets/mus_sid/GroundTruth.csv')
 
 
 if __name__ == '__main__':

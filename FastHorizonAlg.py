@@ -4,14 +4,24 @@ a paper currently under review by Journal of Image and Graphics (United Kingdom)
 
 Implementation by Yassir Zardoua
 """
+import os
+from typing import List
+from typing import Optional
+
 import cv2
 import cv2 as cv
+
 import numpy as np
-import os
+
 from time import time
 from warnings import warn
 from math import pi, atan, sin, cos
 import tkinter as tk
+
+from utils import GroundTruthEntry, ResultRow, ErrorSHL
+from utils import ResultRow
+from utils import evaluate_line
+from utils import save_results_to_csv
 
 
 class FastHorizon:
@@ -212,7 +222,7 @@ class FastHorizon:
                     10, 1.41421356237, self.canny_th1, self.canny_th2
                 )
 
-    def get_horizon(self, img, get_image=False):
+    def get_horizon(self, img, remove_outliers=True, get_image=False):
         """
         :param img:
         :param get_image: if True, the horizon is drawn on the attribute 'self.img_with_hl'
@@ -224,7 +234,7 @@ class FastHorizon:
         self.F_det = True  # will be set to false if no edge point is detected, which means that no horizon is detected
         self.get_horizon_edges(img=img)
         self.hough_transform()
-        self.outlier_handler_module()
+        self.outlier_handler_module(remove_outliers)
         self.linear_least_square_fitting()
         # self.outlier_hl_handler()  # check if the detection is outlier
 
@@ -513,14 +523,14 @@ class FastHorizon:
             self.latency = np.nan
             self.F_det = False
 
-    def outlier_handler_module(self):
+    def outlier_handler_module(self, remove_outliers=True):
         if not self.F_det:
             return  # execute this method only if there is at least one line in the Hough space.
-        self.outlier_checker()
+        self.outlier_checker(remove_outliers)
         self.outlier_replacer()
         self.failure_state_handler()
 
-    def outlier_checker(self):
+    def outlier_checker(self, remove_outliers=True):
         """
         Checks if the longest Hough peak, which we assume as the rough horizon, is an outlier. In such case, flag
         self.F_out is set to True.
@@ -538,8 +548,9 @@ class FastHorizon:
         self.DY = abs(self.Y - self.Y_prv)
         self.Dphi = abs(self.phi - self.phi_prv)
         # establishing outlier flag
-        # self.F_out = (self.DY > self.DY_th) or (self.Dphi > self.Dphi_th)
-        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+        if remove_outliers:
+            self.F_out = (self.DY > self.DY_th) or (self.Dphi > self.Dphi_th)
+        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
     def outlier_replacer(self, M=2):
         """
@@ -820,7 +831,7 @@ class FastHorizon:
             if display:
                 cv2.destroyAllWindows()
 
-    def process_single_image(self, image_path, display=False):
+    def process_single_image(self, image_path, display=False, ground_truth: Optional[GroundTruthEntry] = None) -> ResultRow:
         """
         Processes a single image to detect the horizon.
         :param image_path: absolute path to the image to process.
@@ -832,32 +843,47 @@ class FastHorizon:
         self.res_width = int(self.org_width * self.resize_factor)
         self.res_height = int(self.org_height * self.resize_factor)
 
-        self.get_horizon(img=self.input_img)  # gets the horizon position and tilt
-        print('Detected position: {}, Detected tilt: {}'.format(self.Y, self.phi))
+        Y, phi, latency, F_det = self.get_horizon(
+            img=self.input_img, remove_outliers=False)  # gets the horizon position and tilt
+        print('Detected position: {}, Detected tilt: {}'.format(Y, phi))
         if display:
             self.draw_hl()  # draws the horizon on self.img_with_hl
             cv.imshow('Detected Horizon', self.img_with_hl)
             cv.waitKey(0)
             cv.destroyAllWindows()
-        return (self.Y is not np.nan) and (self.phi is not np.nan)
 
-    def process_image_dataset(self, images_folder):
+        filename = image_path.split(os.sep)[-1]
+        result = ResultRow(filename=filename, detected=F_det, time=latency)
+        if ground_truth is not None:
+            result.error = evaluate_line(self.org_height, Y, phi, ground_truth)
+        return result
+
+    def process_image_dataset(self, images_folder, dataset_name, ground_truth_func, **gt_func_kwargs) -> List[GroundTruthEntry]:
         """
         Processes all images in a given folder to detect horizons.
         :param images_folder: absolute path to the folder containing images to process.
         """
-        image_names = (os.listdir(images_folder))
-        total_size = len(image_names)
         counter = 1
-        failure_count = 0
+        # failure_count = 0
+        failed_images = []
+        ground_truth_array = ground_truth_func(**gt_func_kwargs)  # call the ground truth function to load ground truth data
+        total_size = len(ground_truth_array)
+        results = []
         print('Total number of images to process: {}'.format(total_size))
-        for image_name in image_names:
-            print('Processing image {}/{} : {}'.format(counter, total_size, image_name))
+        for entry in ground_truth_array:
+            print('Processing image {}/{} : {}'.format(counter, total_size, entry.filename))
             counter += 1
-            success = self.process_single_image(
-                os.path.join(images_folder, image_name), display=False)
-            if not success:
-                failure_count += 1
+            result_row = self.process_single_image(
+                os.path.join(images_folder, entry.filename), ground_truth=entry, display=False)
+            if not result_row.detected:
+                # failure_count += 1
+                failed_images.append(entry.filename)
+                continue
+            results.append(result_row)
+
+        save_results_to_csv(results, dataset_name)
         print('Success rate: {:.2f}%'.format(
-            100 * (total_size - failure_count) / total_size))
+            100.0 * (total_size - len(failed_images)) / total_size))
+        for failed_image in failed_images:
+            print('Failed to detect horizon in image: {}'.format(failed_image))
 
