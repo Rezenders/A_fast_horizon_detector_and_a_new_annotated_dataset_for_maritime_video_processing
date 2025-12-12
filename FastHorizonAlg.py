@@ -828,6 +828,10 @@ class FastHorizon:
         """
         print('Processing image: {}'.format(image_path))
         self.input_img = cv.imread(image_path)
+        self.org_height, self.org_width = self.input_img.shape[:2]
+        self.res_width = int(self.org_width * self.resize_factor)
+        self.res_height = int(self.org_height * self.resize_factor)
+
         self.get_horizon(img=self.input_img)  # gets the horizon position and tilt
         print('Detected position: {}, Detected tilt: {}'.format(self.Y, self.phi))
         if display:
@@ -835,17 +839,25 @@ class FastHorizon:
             cv.imshow('Detected Horizon', self.img_with_hl)
             cv.waitKey(0)
             cv.destroyAllWindows()
+        return (self.Y is not np.nan) and (self.phi is not np.nan)
 
-    def process_image_dataset(self, src_image_folder):
+    def process_image_dataset(self, images_folder):
         """
         Processes all images in a given folder to detect horizons.
-        :param src_image_folder: absolute path to the folder containing images to process.
+        :param images_folder: absolute path to the folder containing images to process.
         """
-        src_image_names = (os.listdir(src_image_folder))
-        total_size = len(src_image_names)
+        image_names = (os.listdir(images_folder))
+        total_size = len(image_names)
         counter = 1
+        failure_count = 0
         print('Total number of images to process: {}'.format(total_size))
-        for src_image_name in src_image_names:
-            print('Processing image {}/{}'.format(counter, total_size))
+        for image_name in image_names:
+            print('Processing image {}/{} : {}'.format(counter, total_size, image_name))
             counter += 1
-            self.process_single_image(src_image_path=os.path.join(src_image_folder, src_image_name), display=False)
+            success = self.process_single_image(
+                os.path.join(images_folder, image_name), display=False)
+            if not success:
+                failure_count += 1
+        print('Success rate: {:.2f}%'.format(
+            100 * (total_size - failure_count) / total_size))
+
