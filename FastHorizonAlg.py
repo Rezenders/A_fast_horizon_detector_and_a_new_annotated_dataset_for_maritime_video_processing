@@ -64,7 +64,7 @@ class FastHorizon:
             self.hough_D_theta = hough_D_theta
 
             # Instance of a Fast Segment Detector
-            self.fsd = cv.ximgproc.createFastLineDetector(_canny_th1=self.canny_th1, _canny_th2=self.canny_th2)
+            self.fsd = self._create_fast_line_detector()
             self.img_edges = np.zeros(shape=(100, 100), dtype=np.uint8)
 
             # Attributes related to outlier detections
@@ -195,6 +195,22 @@ class FastHorizon:
 
         self.gt_position_hl = None  # ground truth position (position)
         self.gt_tilt_hl = None  # ground truth tilt (alpha)
+
+    def _create_fast_line_detector(self):
+        """
+        Different OpenCV builds expose different keyword names for createFastLineDetector;
+        try the common signatures before falling back to positional args.
+        """
+        try:
+            return cv.ximgproc.createFastLineDetector(_canny_th1=self.canny_th1, _canny_th2=self.canny_th2)
+        except TypeError:
+            try:
+                return cv.ximgproc.createFastLineDetector(canny_th1=self.canny_th1, canny_th2=self.canny_th2)
+            except TypeError:
+                warn("createFastLineDetector: falling back to positional arguments; check OpenCV version.")
+                return cv.ximgproc.createFastLineDetector(
+                    10, 1.41421356237, self.canny_th1, self.canny_th2
+                )
 
     def get_horizon(self, img, get_image=False):
         """
