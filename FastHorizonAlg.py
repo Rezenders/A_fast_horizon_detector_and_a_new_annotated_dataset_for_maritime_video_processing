@@ -538,7 +538,7 @@ class FastHorizon:
         self.DY = abs(self.Y - self.Y_prv)
         self.Dphi = abs(self.phi - self.phi_prv)
         # establishing outlier flag
-        self.F_out = (self.DY > self.DY_th) or (self.Dphi > self.Dphi_th)
+        # self.F_out = (self.DY > self.DY_th) or (self.Dphi > self.Dphi_th)
         # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
     def outlier_replacer(self, M=2):
@@ -819,3 +819,33 @@ class FastHorizon:
             # Close all OpenCV windows
             if display:
                 cv2.destroyAllWindows()
+
+    def process_single_image(self, image_path, display=False):
+        """
+        Processes a single image to detect the horizon.
+        :param image_path: absolute path to the image to process.
+        :param display: if True, displays the image with the detected horizon.
+        """
+        print('Processing image: {}'.format(image_path))
+        self.input_img = cv.imread(image_path)
+        self.get_horizon(img=self.input_img)  # gets the horizon position and tilt
+        print('Detected position: {}, Detected tilt: {}'.format(self.Y, self.phi))
+        if display:
+            self.draw_hl()  # draws the horizon on self.img_with_hl
+            cv.imshow('Detected Horizon', self.img_with_hl)
+            cv.waitKey(0)
+            cv.destroyAllWindows()
+
+    def process_image_dataset(self, src_image_folder):
+        """
+        Processes all images in a given folder to detect horizons.
+        :param src_image_folder: absolute path to the folder containing images to process.
+        """
+        src_image_names = (os.listdir(src_image_folder))
+        total_size = len(src_image_names)
+        counter = 1
+        print('Total number of images to process: {}'.format(total_size))
+        for src_image_name in src_image_names:
+            print('Processing image {}/{}'.format(counter, total_size))
+            counter += 1
+            self.process_single_image(src_image_path=os.path.join(src_image_folder, src_image_name), display=False)
