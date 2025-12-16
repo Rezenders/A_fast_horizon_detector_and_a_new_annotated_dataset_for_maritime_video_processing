@@ -5,6 +5,7 @@ a paper currently under review by Journal of Image and Graphics (United Kingdom)
 Implementation by Yassir Zardoua
 """
 import os
+from datetime import datetime
 from typing import List
 from typing import Optional
 
@@ -678,6 +679,8 @@ class FastHorizon:
         srt_gt_names = sorted(os.listdir(src_gt_folder))
         for src_video_name, src_gt_name in zip(src_video_names, srt_gt_names):
             print("{} will correspond to {}".format(src_video_name, src_gt_name))
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        result_folder_timestamp = os.path.join(dst_quantitative_results_folder, timestamp)
 
         # Allowing the user to verify that each gt .npy file corresponds to the correct video file # # # # # # # # # # #
         while True:
@@ -693,9 +696,10 @@ class FastHorizon:
                       "THE CORRECT VIDEO FILE")
                 return
         # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-        self.det_horizons_all_files = np.empty(shape=[0, 5])
+        self.det_horizons_all_files = np.empty(shape=[0, 7])
         nbr_of_vids = len(src_video_names)
         vid_indx = 0
+        total_number_of_frames = 0
         for src_video_name, src_gt_name in zip(src_video_names, srt_gt_names):  # each iteration processes one video
             # file
             self.reset_for_new_video()
@@ -716,7 +720,8 @@ class FastHorizon:
             self.res_height = int(self.org_height * self.resize_factor)
             fourcc = cv.VideoWriter_fourcc('M', 'J', 'P', 'G')  # codec used to compress the video.
             if draw_and_save:
-                dst_vid_path = os.path.join(dst_video_folder, "Author1_" + src_video_name)
+                os.makedirs(os.path.dirname(dst_video_folder), exist_ok=True)
+                dst_vid_path = os.path.join(dst_video_folder, "annoted_" + src_video_name)
                 if draw_and_save:
                     video_writer = cv.VideoWriter(dst_vid_path, fourcc, fps, (self.org_width, self.org_height),
                                                   True)  # video writer object
@@ -724,6 +729,7 @@ class FastHorizon:
             #
             nbr_of_annotations = self.gt_horizons.shape[0]
             nbr_of_frames = int(cap.get(propId=cv.CAP_PROP_FRAME_COUNT))
+            total_number_of_frames += nbr_of_frames
             if nbr_of_frames != nbr_of_annotations:
                 warning_text_1 = "The number of annotations (={}) does not equal to the number of frames (={})". \
                     format(nbr_of_annotations, nbr_of_frames)
@@ -731,7 +737,7 @@ class FastHorizon:
                 print(warning_text_1)
                 print("--------------------------")
 
-            self.det_horizons_per_file = np.zeros((nbr_of_annotations, 5))
+            self.det_horizons_per_file = np.zeros((nbr_of_annotations, 7))
             self.__init__(init_all=True)  # reinitialize all attribures of the algorithm before processing the new video
             for idx, gt_horizon in enumerate(self.gt_horizons):
                 no_error_flag, frame = cap.read()
@@ -744,10 +750,16 @@ class FastHorizon:
                 # print("detected position/gt position {}/{};\n detected tilt/gt tilt {}/{}".
                 #       format(self.Y, self.gt_position_hl, self.phi, self.gt_tilt_hl))
                 print("Frame {}/{}. Video {}/{}".format(idx, nbr_of_frames, vid_indx, nbr_of_vids))
+                error_pos = abs(self.Y - self.gt_position_hl)
+                error_pos_normalized = error_pos / self.org_height
+                error_angle = abs(self.phi - self.gt_tilt_hl)
+                composite_error = 100* np.sqrt(error_pos_normalized * 0.5 + (error_angle / 180) * 0.5)
                 self.det_horizons_per_file[idx] = [self.Y,
                                                    self.phi,
-                                                   round(abs(self.Y - self.gt_position_hl), 4),
-                                                   round(abs(self.phi - self.gt_tilt_hl), 4),
+                                                   round(error_pos, 4),
+                                                   round(error_pos_normalized, 4),
+                                                   round(error_angle, 4),
+                                                   composite_error,
                                                    self.latency]
                 if draw_and_save:
                     self.draw_hl()  # draws the horizon on self.img_with_hl
@@ -758,11 +770,15 @@ class FastHorizon:
             print("The video file {} has been processed.".format(src_video_name))
 
             # saving the .npy file of quantitative results of current video file # # # # # # # # # # # # # # # # # # # #
+            os.makedirs(result_folder_timestamp, exist_ok=True)
             src_video_name_no_ext = os.path.splitext(src_video_name)[0]
-            det_horizons_per_file_dst_path = os.path.join(dst_quantitative_results_folder,
-                                                          src_video_name_no_ext + ".npy")
-            np.save(det_horizons_per_file_dst_path, self.det_horizons_per_file)
-            # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+            det_horizons_per_file_dst_path = os.path.join(result_folder_timestamp,
+                                                          src_video_name_no_ext + ".csv")
+            # np.save(det_horizons_per_file_dst_path, self.det_horizons_per_file)
+            #TODO: include header in csv
+            header = "Y, phi, error_pos, error_pos_normalized, error_angle, composite_error, latency"
+            np.savetxt(det_horizons_per_file_dst_path, self.det_horizons_per_file, delimiter=",", header=header)
+            # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
             self.det_horizons_all_files = np.append(self.det_horizons_all_files,
                                                     self.det_horizons_per_file,
                                                     axis=0)
@@ -770,14 +786,39 @@ class FastHorizon:
 
         # after processing all video files, save quantitative results as .npy file
         src_video_folder_name = os.path.basename(src_video_folder)
-        dst_detected_path = os.path.join(dst_quantitative_results_folder,
-                                         "all_det_hl_" + src_video_folder_name + ".npy")
-        np.save(dst_detected_path, self.det_horizons_all_files)
+        dst_detected_path = os.path.join(result_folder_timestamp,
+                                         "all_det_hl_" + src_video_folder_name + ".csv")
+        # np.save(dst_detected_path, self.det_horizons_all_files)
+        header = "success_rate (%), average time (s), mean_pos_error, stdev_pos_error,mean_normalized_pos_error,stdev_normalized_pos_error, mean_angular_error, stdev_angular_error, mean composite error, stdev composite error"
 
-        self.Y_hl_all = self.det_horizons_all_files[:, 2]
-        self.alpha_hl_all = self.det_horizons_all_files[:, 3]
-        self.latency_all = self.det_horizons_all_files[:, 4]
-        self.false_positive_nbr = np.size(np.argwhere(np.isnan(self.Y_hl_all)))
+        mean_pos_error = np.nanmean(self.det_horizons_all_files[:, 2])
+        mean_norm_pos_error = np.nanmean(self.det_horizons_all_files[:, 3])
+        mean_norm_angular_error = np.nanmean(self.det_horizons_all_files[:, 4])
+        mean_composite_error = np.nanmean(self.det_horizons_all_files[:, 5])
+        mean_time = np.nanmean(self.det_horizons_all_files[:, 6])
+
+        std_pos_error = np.nanstd(self.det_horizons_all_files[:, 2])
+        std_norm_pos_error = np.nanstd(self.det_horizons_all_files[:, 3])
+        std_norm_angular_error = np.nanstd(self.det_horizons_all_files[:, 4])
+        std_composite_error = np.nanstd(self.det_horizons_all_files[:, 5])
+        # std_time = np.nanmean(self.det_horizons_all_files[:, 6])
+
+        false_positive_nbr = np.size(np.argwhere(np.isnan(self.det_horizons_all_files[:, 2])))
+        success_rate = 100 * (total_number_of_frames - false_positive_nbr) / total_number_of_frames
+
+        result_all = np.array([
+            success_rate,
+            mean_time,
+            mean_pos_error,
+            std_pos_error,
+            mean_norm_pos_error,
+            std_norm_pos_error,
+            mean_norm_angular_error,
+            std_norm_angular_error,
+            mean_composite_error,
+            std_composite_error
+        ])
+        np.savetxt(dst_detected_path, result_all.reshape(1, -1), delimiter=",", header=header)
 
     def video_demo(self, video_path, display=True):
         demo_cap = cv2.VideoCapture(video_path)
@@ -886,4 +927,3 @@ class FastHorizon:
             100.0 * (total_size - len(failed_images)) / total_size))
         for failed_image in failed_images:
             print('Failed to detect horizon in image: {}'.format(failed_image))
-
